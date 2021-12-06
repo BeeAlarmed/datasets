@@ -97,8 +97,8 @@ class DatasetInfo(object):
       description: `str`, description of this dataset.
       features: `tfds.features.FeaturesDict`, Information on the feature dict of
         the `tf.data.Dataset()` object from the `builder.as_dataset()` method.
-      supervised_keys: Specifies the input structure for supervised learning,
-        if applicable for the dataset, used with "as_supervised". The keys
+      supervised_keys: Specifies the input structure for supervised learning, if
+        applicable for the dataset, used with "as_supervised". The keys
         correspond to the feature names to select in `info.features`. When
         calling `tfds.core.DatasetBuilder.as_dataset()` with
         `as_supervised=True`, the `tf.data.Dataset` object will yield the
@@ -649,6 +649,27 @@ def read_from_json(path: type_utils.PathLike) -> dataset_info_pb2.DatasetInfo:
   # Parse it back into a proto.
   parsed_proto = json_format.Parse(json_str, dataset_info_pb2.DatasetInfo())
   return parsed_proto
+
+
+def read_from_builder_dir(
+    builder_dir: type_utils.PathLike) -> dataset_info_pb2.DatasetInfo:
+  """Reads the dataset info from the given builder dir.
+
+  Args:
+    builder_dir: The folder that contains the dataset info files.
+
+  Returns:
+    The DatasetInfo proto as read from the builder dir.
+
+  Raises:
+    FileNotFoundError: If the builder_dir does not exists.
+  """
+  info_path = os.path.join(
+      os.path.expanduser(builder_dir), DATASET_INFO_FILENAME)
+  if not tf.io.gfile.exists(info_path):
+    raise FileNotFoundError(
+        f"Could not load `ReadOnlyBuilder`: {info_path} does not exists.")
+  return read_from_json(info_path)
 
 
 def pack_as_supervised_ds(

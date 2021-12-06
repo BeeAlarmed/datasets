@@ -27,6 +27,8 @@ from tensorflow_datasets.core import naming
 from tensorflow_datasets.core import registered
 from tensorflow_datasets.core import utils
 from tensorflow_datasets.core.features import feature as feature_lib
+from tensorflow_datasets.core.features import features_dict
+from tensorflow_datasets.core.proto import dataset_info_pb2
 from tensorflow_datasets.core.utils import file_utils
 from tensorflow_datasets.core.utils import version as version_lib
 
@@ -35,41 +37,37 @@ class ReadOnlyBuilder(
     dataset_builder.FileReaderBuilder, skip_registration=True):
   """Generic DatasetBuilder loading from a directory."""
 
-  def __init__(self, builder_dir: utils.PathLike):
+  def __init__(self,
+               builder_dir: utils.PathLike,
+               info_proto: Optional[dataset_info_pb2.DatasetInfo] = None,
+               features: Optional[features_dict.FeaturesDict] = None):
     """Constructor.
 
     Args:
       builder_dir: Directory of the dataset to load (e.g.
         `~/tensorflow_datasets/mnist/3.0.0/`)
+      info_proto: DatasetInfo describing the name, config, etc of the requested
+        dataset.
+      features: Optional FeaturesDict specifying the features of the dataset.
 
     Raises:
       FileNotFoundError: If the builder_dir does not exists.
     """
     builder_dir = os.path.expanduser(builder_dir)
-    info_path = os.path.join(builder_dir, dataset_info.DATASET_INFO_FILENAME)
-    if not tf.io.gfile.exists(info_path):
-      raise FileNotFoundError(
-          f'Could not load `ReadOnlyBuilder`: {info_path} does not exists.')
+    if not info_proto:
+      info_proto = dataset_info.read_from_builder_dir(builder_dir)
 
-    # Restore name, config, info
-    info_proto = dataset_info.read_from_json(info_path)
     self.name = info_proto.name
     self.VERSION = version_lib.Version(info_proto.version)  # pylint: disable=invalid-name
-    release_notes = info_proto.release_notes or {}
-    self.RELEASE_NOTES = release_notes  # pylint: disable=invalid-name
+    self.RELEASE_NOTES = info_proto.release_notes or {}  # pylint: disable=invalid-name
     if info_proto.module_name:
       # Overwrite the module so documenting `ReadOnlyBuilder` point to the
       # original source code.
       self.__module__ = info_proto.module_name
-    if info_proto.config_name:
-      builder_config = dataset_builder.BuilderConfig(
-          name=info_proto.config_name,
-          description=info_proto.config_description,
-          version=info_proto.version or None,
-          release_notes=release_notes,
-      )
-    else:
-      builder_config = None
+
+    self._features_override = features
+
+    builder_config = dataset_builder.BuilderConfig.from_dataset_info(info_proto)
     # __init__ will call _build_data_dir, _create_builder_config,
     # _pick_version to set the data_dir, config, and version
     super().__init__(
@@ -99,7 +97,8 @@ class ReadOnlyBuilder(
     return data_dir, data_dir  # _data_dir_root, _data_dir are builder_dir.
 
   def _info(self) -> dataset_info.DatasetInfo:
-    return dataset_info.DatasetInfo(builder=self)
+    return dataset_info.DatasetInfo(
+        builder=self, features=self._features_override)
 
   def _download_and_prepare(self, **kwargs):  # pylint: disable=arguments-differ
     # DatasetBuilder.download_and_prepare is a no-op as self.data_dir already
@@ -108,15 +107,18 @@ class ReadOnlyBuilder(
 
 
 def builder_from_directory(
-    builder_dir: utils.PathLike,) -> dataset_builder.DatasetBuilder:
+    builder_dir: utils.PathLike,
+    info_proto: Optional[dataset_info_pb2.DatasetInfo] = None,
+    features: Optional[features_dict.FeaturesDict] = None,
+) -> dataset_builder.DatasetBuilder:
   """Loads a `tfds.core.DatasetBuilder` from the given generated dataset path.
 
   Reconstructs the `tfds.core.DatasetBuilder` without requiring the original
   generation code.
 
-  From `<builder_dir>/features.json` it infers the structure (feature names,
-  nested dict,...) and content (image, sequence,...) of the dataset. The
-  serialization format is defined in
+  If the info_proto is not specified, the dataset structure (feature names,
+  nested dict,...) and content (image, sequence, ...) is read from
+  `<builder_dir>/features.json`. The serialization format is defined in
   `tfds.features.FeatureConnector` in `to_json()`.
 
   Note: This function only works for datasets generated with TFDS `4.0.0` or
@@ -125,11 +127,15 @@ def builder_from_directory(
   Args:
     builder_dir: `str`, path of the directory containing the dataset to read (
       e.g. `~/tensorflow_datasets/mnist/3.0.0/`).
+    info_proto: Optional DatasetInfo describing the name, config, etc of the
+      requested dataset. If not specified, it is read from the folder.
+    features: Optional FeaturesDict specifying the features of the dataset.
 
   Returns:
     builder: `tf.core.DatasetBuilder`, builder for dataset at the given path.
   """
-  return ReadOnlyBuilder(builder_dir=builder_dir)
+  return ReadOnlyBuilder(
+      builder_dir=builder_dir, info_proto=info_proto, features=features)
 
 
 def builder_from_files(
